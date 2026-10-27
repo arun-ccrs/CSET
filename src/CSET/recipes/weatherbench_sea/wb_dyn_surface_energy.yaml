@@ -1,0 +1,33 @@
+category: WeatherBench SEA - Dynamic
+title: Surface temperature energy flux divergence RMSE per case, AIFS against ERA5
+description: |
+  Divergence of the near-surface heat flux, rho cp T2m V10, with rho = 1.2 kg m-3.
+  RMSE over the whole box, per case (no sign masking).
+
+steps:
+  - operator: read.read_cubes
+    file_paths: $INPUT_PATHS
+    model_names: [ERA5, AIFS]
+
+  - operator: energetics.surface_energy_flux_divergence
+    eastward_wind:
+      operator: filters.filter_multiple_cubes
+      constraint:
+        operator: constraints.generate_var_constraint
+        varname: eastward_wind
+    northward_wind:
+      operator: filters.filter_multiple_cubes
+      constraint:
+        operator: constraints.generate_var_constraint
+        varname: northward_wind
+    temperature:
+      operator: filters.filter_multiple_cubes
+      constraint:
+        operator: constraints.generate_var_constraint
+        varname: air_temperature
+
+  - operator: scoreswrappers.scores_rmse
+    preserved_coordinates: [time]
+
+  - operator: write.write_cube_to_nc
+    overwrite: True

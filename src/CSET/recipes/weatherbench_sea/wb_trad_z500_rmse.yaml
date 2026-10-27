@@ -1,0 +1,26 @@
+category: WeatherBench SEA - Traditional
+title: Z500 RMSE per case, AIFS against ERA5
+description: |
+  Per-case RMSE of 500 hPa geopotential between AIFS and ERA5 over the
+  WeatherBench Southeast Asia box. WeatherBench's Traditional score is the
+  mean of these per-case values divided by the ERA5 full-year domain mean.
+
+steps:
+  - operator: read.read_cubes
+    file_paths: $INPUT_PATHS
+    model_names: [ERA5, AIFS]
+    constraint:
+      operator: constraints.combine_constraints
+      variable_constraint:
+        operator: constraints.generate_var_constraint
+        varname: geopotential
+      level_constraint:
+        operator: constraints.generate_level_constraint
+        coordinate: pressure
+        levels: 500
+
+  - operator: scoreswrappers.scores_rmse
+    preserved_coordinates: [time]
+
+  - operator: write.write_cube_to_nc
+    overwrite: True

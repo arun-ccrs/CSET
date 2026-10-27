@@ -1,0 +1,18 @@
+category: WeatherBench SEA - Precipitation
+title: FSS at $THRESHOLD mm per case, AIFS against GPM
+description: |
+  Fractions Skill Score of 6-hourly accumulated precipitation against GPM,
+  event = at least $THRESHOLD mm, square window of $WINDOW_KM km (one 0.25
+  degree grid point by default). One value per case.
+
+steps:
+  - operator: read.read_cubes
+    file_paths: $INPUT_PATHS
+    model_names: [GPM, AIFS]
+
+  - operator: scoreswrappers.scores_fss
+    threshold: $THRESHOLD
+    window_km: $WINDOW_KM
+
+  - operator: write.write_cube_to_nc
+    overwrite: True

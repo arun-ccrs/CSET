@@ -1,0 +1,67 @@
+category: WeatherBench SEA - Dynamic
+title: Vorticity-weighted MSE flux convergence RMSE per case at $LEVEL hPa, AIFS against ERA5
+description: |
+  Divergence of the vorticity-weighted moist static energy flux, h zeta V,
+  kept where negative (convergence). This is WeatherBench's "vorticity
+  convergence" metric, used at 850 hPa. RMSE over points where both ERA5 and
+  the model converge, per case.
+
+steps:
+  - operator: read.read_cubes
+    file_paths: $INPUT_PATHS
+    model_names: [ERA5, AIFS]
+    constraint:
+      operator: constraints.generate_level_constraint
+      coordinate: pressure
+      levels: $LEVEL
+
+  - operator: energetics.keep_sign
+    sign: negative
+    cubes:
+      operator: energetics.horizontal_flux_divergence
+      nan_safe_meridional: True
+      eastward_wind:
+        operator: filters.filter_multiple_cubes
+        constraint:
+          operator: constraints.generate_var_constraint
+          varname: eastward_wind
+      northward_wind:
+        operator: filters.filter_multiple_cubes
+        constraint:
+          operator: constraints.generate_var_constraint
+          varname: northward_wind
+      scalar:
+        operator: energetics.moist_static_energy
+        temperature:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: air_temperature
+        geopotential:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: geopotential
+        specific_humidity:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: specific_humidity
+      multiplier:
+        operator: energetics.relative_vorticity
+        eastward_wind:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: eastward_wind
+        northward_wind:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: northward_wind
+
+  - operator: scoreswrappers.scores_rmse
+    preserved_coordinates: [time]
+
+  - operator: write.write_cube_to_nc
+    overwrite: True

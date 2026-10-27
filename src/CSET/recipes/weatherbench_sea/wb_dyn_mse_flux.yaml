@@ -1,0 +1,55 @@
+category: WeatherBench SEA - Dynamic
+title: MSE flux $SIGN part RMSE per case at $LEVEL hPa, AIFS against ERA5
+description: |
+  Divergence of the moist static energy flux, h V with h = cp T + z + Lv q,
+  kept where it has the requested sign (negative = convergence, used at 850 hPa;
+  positive = divergence, used at 200 hPa). RMSE over points where both ERA5 and
+  the model have that sign, per case. WeatherBench's Dynamic score is the mean
+  of these per-case values divided by the ERA5 full-year mean magnitude.
+
+steps:
+  - operator: read.read_cubes
+    file_paths: $INPUT_PATHS
+    model_names: [ERA5, AIFS]
+    constraint:
+      operator: constraints.generate_level_constraint
+      coordinate: pressure
+      levels: $LEVEL
+
+  - operator: energetics.keep_sign
+    sign: $SIGN
+    cubes:
+      operator: energetics.horizontal_flux_divergence
+      eastward_wind:
+        operator: filters.filter_multiple_cubes
+        constraint:
+          operator: constraints.generate_var_constraint
+          varname: eastward_wind
+      northward_wind:
+        operator: filters.filter_multiple_cubes
+        constraint:
+          operator: constraints.generate_var_constraint
+          varname: northward_wind
+      scalar:
+        operator: energetics.moist_static_energy
+        temperature:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: air_temperature
+        geopotential:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: geopotential
+        specific_humidity:
+          operator: filters.filter_multiple_cubes
+          constraint:
+            operator: constraints.generate_var_constraint
+            varname: specific_humidity
+
+  - operator: scoreswrappers.scores_rmse
+    preserved_coordinates: [time]
+
+  - operator: write.write_cube_to_nc
+    overwrite: True

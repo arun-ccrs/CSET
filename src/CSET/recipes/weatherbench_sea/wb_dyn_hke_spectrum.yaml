@@ -1,0 +1,38 @@
+category: WeatherBench SEA - Dynamic
+title: HKE spectrum RMSE at $LEVEL hPa, AIFS against ERA5
+description: |
+  Horizontal kinetic energy spectrum, (u^2 + v^2)/2, from a 2D FFT averaged
+  along one axis. Spectra are averaged over all cases for each model, then the
+  RMSE across wavenumbers between the ERA5 and model mean spectra is taken.
+  WeatherBench normalises this by the ERA5 full-year mean power at the level
+  and averages 850, 700 and 200 hPa.
+
+steps:
+  - operator: read.read_cubes
+    file_paths: $INPUT_PATHS
+    model_names: [ERA5, AIFS]
+    constraint:
+      operator: constraints.generate_level_constraint
+      coordinate: pressure
+      levels: $LEVEL
+
+  - operator: power_spectrum.hke_fft_axis_mean_spectrum
+    eastward_wind:
+      operator: filters.filter_multiple_cubes
+      constraint:
+        operator: constraints.generate_var_constraint
+        varname: eastward_wind
+    northward_wind:
+      operator: filters.filter_multiple_cubes
+      constraint:
+        operator: constraints.generate_var_constraint
+        varname: northward_wind
+
+  - operator: collapse.collapse
+    coordinate: time
+    method: MEAN
+
+  - operator: scoreswrappers.scores_rmse
+
+  - operator: write.write_cube_to_nc
+    overwrite: True
