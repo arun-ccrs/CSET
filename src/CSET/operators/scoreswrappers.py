@@ -25,11 +25,12 @@ import scores
 import scores.categorical
 import scores.continuous
 import scores.probability
+import scores.spatial
 import xarray as xr
 from iris.cube import Cube, CubeList
 from iris.util import reverse
 
-from CSET._common import is_increasing
+from CSET._common import is_increasing, iter_maybe
 from CSET.operators._utils import fully_equalise_attributes, get_cube_yxcoordname
 from CSET.operators.constraints import (
     generate_realization_constraint,
@@ -639,6 +640,89 @@ def scores_frequency_bias(
     )
 
 
+KM_PER_DEGREE = 111.2
+
+
+def scores_fss(
+    cubes: CubeList,
+    threshold: float,
+    window_km: float = 0.25 * KM_PER_DEGREE,
+) -> Cube | CubeList:
+    r"""Calculate the Fractions Skill Score (FSS) for each time using scores.
+
+    Wraps ``scores.spatial.fss_2d_single_field`` ([scoresa]_, [scoresb]_),
+    applied separately to every time in the cubes, so a time series of FSS is
+    returned; collapse it over time for a single value per model.
+
+    The neighbourhood is given as a distance and converted to grid points from
+    the base grid spacing, so the same window means the same distance on any
+    grid. The conversion uses 111.2 km per degree and rounds to the nearest
+    point, as the Southeast Asia regional WeatherBench does.
+
+    Parameters
+    ----------
+    cubes: iris.cube.CubeList
+        A base cube (observations or analysis, for example GPM) and one or more
+        model cubes of accumulated precipitation in the same units.
+    threshold: float
+        Event threshold, in the units of the cubes. An event is a value at or
+        above the threshold.
+    window_km: float, optional
+        Side of the square neighbourhood in km. Default 27.8 km, one 0.25°
+        grid point.
+
+    Returns
+    -------
+    iris.cube.Cube | iris.cube.CubeList
+        FSS for each time, one cube per model.
+    """
+    base, others = _split_base_and_other(cubes)
+    scores_cubelist = CubeList()
+    for other in iter_maybe(others):
+        base_v, other_v = _process_cubes_for_verification(base, other)
+        lat_name, lon_name = get_cube_yxcoordname(base_v)
+        spacing = abs(float(np.diff(base_v.coord(lat_name).points[:2])[0]))
+        window = int(np.floor(window_km / (KM_PER_DEGREE * spacing) + 0.5))
+
+        values, times = [], []
+        for b, o in zip(
+            base_v.slices([lat_name, lon_name]),
+            other_v.slices([lat_name, lon_name]),
+            strict=True,
+        ):
+            values.append(
+                scores.spatial.fss_2d_single_field(
+                    o.data,
+                    b.data,
+                    event_threshold=threshold,
+                    window_size=(window, window),
+                )
+            )
+            times.append(b.coord("time").copy())
+
+        time = times[0].copy(points=[t.points[0] for t in times])
+        fss = Cube(
+            np.array(values, dtype=np.float64),
+            long_name=f"FSS_of_{base.name()}",
+            units="1",
+            dim_coords_and_dims=[(iris.coords.DimCoord.from_coord(time), 0)]
+            if len(values) > 1
+            else None,
+            attributes={"model_name": other_v.attributes["model_name"]},
+        )
+        if len(values) == 1:
+            fss.add_aux_coord(time)
+        for name, value in (
+            ("threshold", threshold),
+            ("window_km", window_km),
+            ("window_gridpoints", window),
+        ):
+            fss.add_aux_coord(iris.coords.AuxCoord(value, long_name=name))
+        scores_cubelist.append(fss)
+
+    return scores_cubelist[0] if len(scores_cubelist) == 1 else scores_cubelist
+
+
 def _make_scores_cube(
     base: Cube, other: Cube, metric: str, preserved_coordinates: list[str]
 ) -> Cube:
@@ -764,47 +848,17 @@ def _ensure_increasing_pressure_coordinates(cubes: CubeList) -> CubeList:
             pass
 
 
-def _process_cubes_for_verification(base: Cube, other: Cube) -> tuple[Cube, Cube]:
-    r"""Prepare cubes ready for verification in scores.
+def _has_horizontal_grid(cube: Cube) -> bool:
+    """Whether the cube has identifiable horizontal (y, x) coordinates."""
+    try:
+        get_cube_yxcoordname(cube)
+    except ValueError:
+        return False
+    return True
 
-    Parameters
-    ----------
-    base: iris.cube.Cube
-        The cube from the "analysis" or observed cube.
-    other: iris.cube.Cube
-        The cube from the model.
 
-    Returns
-    -------
-    base: iris.cube.Cube
-        The cube from the "analysis" or observed cube in the same format as the other model.
-    other: iris.cube.Cube
-        The cube from the model in the same format as the base model.
-
-    Notes
-    -----
-    This operator is used for sorting the data into the correct format. It
-    is likely going to need to be refactored out of CSET and perhaps moved into
-    `CSET._utils` given common code between here and `misc.difference`.
-    """
-    # Set cubes into correct format using code from difference operator
-
-    # Extract just common time points.
-    other_model_name = other.attributes["model_name"]
-
-    base, other = _extract_common_time_points(base, other)
-
-    if base.coords("pressure") and other.coords("pressure"):
-        common_pressure = np.intersect1d(
-            base.coord("pressure").points,
-            other.coord("pressure").points,
-        )
-
-        pressure_constraint = iris.Constraint(pressure=common_pressure.tolist())
-
-        base = base.extract(pressure_constraint)
-        other = other.extract(pressure_constraint)
-
+def _align_horizontal_grids(base: Cube, other: Cube) -> tuple[Cube, Cube]:
+    """Put base and other on a common grid with the same latitude direction."""
     # Get spatial coord names.
     base_lat_name, base_lon_name = get_cube_yxcoordname(base)
     other_lat_name, other_lon_name = get_cube_yxcoordname(other)
@@ -855,6 +909,54 @@ def _process_cubes_for_verification(base: Cube, other: Cube) -> tuple[Cube, Cube
         other_tmp.units = other.units
         # Replace the cube.
         other = other_tmp
+    return base, other
+
+
+def _process_cubes_for_verification(base: Cube, other: Cube) -> tuple[Cube, Cube]:
+    r"""Prepare cubes ready for verification in scores.
+
+    Parameters
+    ----------
+    base: iris.cube.Cube
+        The cube from the "analysis" or observed cube.
+    other: iris.cube.Cube
+        The cube from the model.
+
+    Returns
+    -------
+    base: iris.cube.Cube
+        The cube from the "analysis" or observed cube in the same format as the other model.
+    other: iris.cube.Cube
+        The cube from the model in the same format as the base model.
+
+    Notes
+    -----
+    This operator is used for sorting the data into the correct format. It
+    is likely going to need to be refactored out of CSET and perhaps moved into
+    `CSET._utils` given common code between here and `misc.difference`.
+    """
+    # Set cubes into correct format using code from difference operator
+
+    # Extract just common time points.
+    other_model_name = other.attributes["model_name"]
+
+    base, other = _extract_common_time_points(base, other)
+
+    if base.coords("pressure") and other.coords("pressure"):
+        common_pressure = np.intersect1d(
+            base.coord("pressure").points,
+            other.coord("pressure").points,
+        )
+
+        pressure_constraint = iris.Constraint(pressure=common_pressure.tolist())
+
+        base = base.extract(pressure_constraint)
+        other = other.extract(pressure_constraint)
+
+    # Spatial alignment only applies to gridded fields; spectra, profiles and
+    # other non-spatial results are compared as they are.
+    if _has_horizontal_grid(base) and _has_horizontal_grid(other):
+        base, other = _align_horizontal_grids(base, other)
 
     # Equalise attributes so we can merge.
     fully_equalise_attributes(CubeList([base, other]))

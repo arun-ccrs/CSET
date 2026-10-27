@@ -428,3 +428,40 @@ def test_calculate_power_spectrum_raises_for_different_multi_point_times():
         ),
     ):
         power_spectrum.calculate_power_spectrum(cube)
+
+
+def _wind_cube(data, lats, lons, name):
+    cube = iris.cube.Cube(
+        data,
+        long_name=name,
+        units="m s-1",
+        dim_coords_and_dims=[
+            (iris.coords.DimCoord(lats, standard_name="latitude", units="degrees"), 0),
+            (iris.coords.DimCoord(lons, standard_name="longitude", units="degrees"), 1),
+        ],
+    )
+    cube.attributes["model_name"] = "M"
+    return cube
+
+
+@pytest.mark.parametrize("shape", [(141, 201), (201, 141)])
+def test_hke_fft_axis_mean_spectrum_matches_weatherbench(shape):
+    """Same numbers as weatherbench.py hke_spectrum_2d + radial_average_spectrum_2d."""
+    rng = np.random.default_rng(3)
+    lats = -10 + 0.25 * np.arange(shape[0])
+    lons = 90 + 0.25 * np.arange(shape[1])
+    u, v = rng.standard_normal(shape) * 5, rng.standard_normal(shape) * 5
+
+    hke = 0.5 * (u**2 + v**2)
+    meters_deg = 2 * np.pi * 6371220.0 / 360.0
+    power = np.fft.fftshift(np.abs(np.fft.fftn(hke)) ** 2, axes=(0, 1))
+    kx = np.fft.fftshift(np.fft.fftfreq(shape[1], 0.25 * meters_deg))
+    ky = np.fft.fftshift(np.fft.fftfreq(shape[0], 0.25 * meters_deg))
+    expected = power.mean(axis=1) if max(kx) > max(ky) else power.mean(axis=0)
+
+    result = power_spectrum.hke_fft_axis_mean_spectrum(
+        _wind_cube(u, lats, lons, "u"), _wind_cube(v, lats, lons, "v")
+    )
+    np.testing.assert_allclose(result.data, expected, rtol=1e-12)
+    assert result.coord("physical_wavenumber").units == "km-1"
+    assert result.attributes["model_name"] == "M"

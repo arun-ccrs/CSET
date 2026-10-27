@@ -1001,3 +1001,83 @@ def test_pfd_gt_complete_miss(make_cube_categorical_testing):
 
     assert len(result) == 1
     assert np.allclose(result[0].data, 1.0, atol=1e-2, rtol=1e-6)
+
+
+def _fss_pair(base_data, other_data, spacing=0.25):
+    """GPM-like base and model cubes on a regular grid with a time dimension."""
+    nt, ny, nx = base_data.shape
+    time = iris.coords.DimCoord(
+        np.arange(nt, dtype=float), standard_name="time", units="hours since 2024-01-01"
+    )
+    lat = iris.coords.DimCoord(
+        np.arange(ny) * spacing, standard_name="latitude", units="degrees"
+    )
+    lon = iris.coords.DimCoord(
+        100 + np.arange(nx) * spacing, standard_name="longitude", units="degrees"
+    )
+    cubes = CubeList()
+    for data, name in ((base_data, "GPM"), (other_data, "Model")):
+        c = Cube(
+            data,
+            long_name="precipitation_amount",
+            units="mm",
+            dim_coords_and_dims=[(time.copy(), 0), (lat.copy(), 1), (lon.copy(), 2)],
+        )
+        c.attributes["model_name"] = name
+        cubes.append(c)
+    cubes[0].attributes["cset_comparison_base"] = 1
+    return cubes
+
+
+def test_scores_fss_matches_scores_per_time():
+    """One FSS per time, equal to scores.spatial.fss_2d_single_field on that slice."""
+    rng = np.random.default_rng(0)
+    obs = rng.gamma(0.5, 6.0, (3, 30, 40))
+    fcst = rng.gamma(0.5, 6.0, (3, 30, 40))
+    result = scoreswrappers.scores_fss(_fss_pair(obs, fcst), threshold=5.0)
+    assert result.shape == (3,)
+    assert result.attributes["model_name"] == "Model"
+    assert result.coord("window_gridpoints").points[0] == 1
+    for i in range(3):
+        expected = scores.spatial.fss_2d_single_field(
+            fcst[i], obs[i], event_threshold=5.0, window_size=(1, 1)
+        )
+        assert result.data[i] == pytest.approx(float(expected))
+
+
+def test_scores_fss_perfect_forecast():
+    """A forecast identical to the observations scores 1."""
+    rng = np.random.default_rng(1)
+    obs = rng.gamma(0.5, 6.0, (2, 20, 20))
+    result = scoreswrappers.scores_fss(
+        _fss_pair(obs, obs.copy()), threshold=10.0, window_km=60.0
+    )
+    np.testing.assert_allclose(result.data, 1.0)
+
+
+@pytest.mark.parametrize(
+    ("spacing", "window_km", "expected"),
+    [(0.25, 27.8, 1), (0.1, 27.8, 3), (0.25, 139.0, 5)],
+)
+def test_scores_fss_window_from_km(spacing, window_km, expected):
+    """Window size in grid points is km / (111.2 * spacing), rounded half up."""
+    data = np.zeros((2, 20, 20))
+    result = scoreswrappers.scores_fss(
+        _fss_pair(data, data.copy(), spacing), threshold=1.0, window_km=window_km
+    )
+    assert result.coord("window_gridpoints").points[0] == expected
+
+
+def test_scores_rmse_without_horizontal_grid():
+    """Non-spatial fields such as spectra are compared without regridding."""
+    k = iris.coords.DimCoord(
+        np.linspace(-1, 1, 9), long_name="physical_wavenumber", units="km-1"
+    )
+    base = Cube(np.arange(9.0), long_name="power", dim_coords_and_dims=[(k, 0)])
+    other = Cube(
+        np.arange(9.0) + 2.0, long_name="power", dim_coords_and_dims=[(k.copy(), 0)]
+    )
+    base.attributes.update({"model_name": "ERA5", "cset_comparison_base": 1})
+    other.attributes["model_name"] = "AIFS"
+    result = scoreswrappers.scores_rmse(CubeList([base, other]))
+    assert float(result.data) == pytest.approx(2.0)

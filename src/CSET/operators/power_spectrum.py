@@ -531,3 +531,86 @@ def _coord_dimension(cube, coord_name):
         raise ValueError(f"Expected {coord_name} to be a one-dimensional coordinate.")
 
     return coord_dims[0]
+
+
+def hke_fft_axis_mean_spectrum(
+    eastward_wind: iris.cube.Cube | iris.cube.CubeList,
+    northward_wind: iris.cube.Cube | iris.cube.CubeList,
+    earth_radius: float = 6371220.0,
+) -> iris.cube.Cube | iris.cube.CubeList:
+    r"""Spectrum of horizontal kinetic energy from a 2D FFT, averaged along one axis.
+
+    This is the HKE spectrum of the Southeast Asia regional WeatherBench
+    (arun-ccrs/weatherbench), kept so that benchmark's numbers can be
+    reproduced. For new work prefer :func:`calculate_power_spectrum`, which
+    uses a DCT and does not assume a periodic domain.
+
+    For each latitude-longitude field, :math:`HKE = (u^2 + v^2)/2` is
+    Fourier transformed in 2D and its power :math:`|H|^2` is shifted so zero
+    frequency is central. The power is then averaged along the axis with the
+    larger maximum frequency, leaving a 1D spectrum along the other axis.
+    Negative and positive wavenumbers are both kept.
+
+    Arguments
+    ---------
+    eastward_wind, northward_wind: iris.cube.Cube | iris.cube.CubeList
+        Wind components on a regular latitude-longitude grid, one cube per
+        model. Any other dimensions (such as time) are kept.
+    earth_radius: float, optional
+        Used only to express the wavenumber coordinate in km-1. Default
+        6371220 m, as in the benchmark.
+
+    Returns
+    -------
+    iris.cube.Cube | iris.cube.CubeList
+        Power along a ``physical_wavenumber`` coordinate (km-1), one cube per
+        model, with the input's non-spatial coordinates and attributes.
+    """
+    out = iris.cube.CubeList()
+    km_per_degree = 2 * np.pi * earth_radius / 360.0 / 1000.0
+    for u, v in zip(iter_maybe(eastward_wind), iter_maybe(northward_wind), strict=True):
+        lats = u.coord("latitude").points
+        lons = u.coord("longitude").points
+        dy = abs(lats[1] - lats[0]) * km_per_degree
+        dx = abs(lons[1] - lons[0]) * km_per_degree
+        kx = np.fft.fftshift(np.fft.fftfreq(lons.size, dx))
+        ky = np.fft.fftshift(np.fft.fftfreq(lats.size, dy))
+        # Average across the axis with the larger maximum frequency.
+        keep_y = kx.max() > ky.max()
+        wavenumber = iris.coords.DimCoord(
+            ky if keep_y else kx, long_name="physical_wavenumber", units="km-1"
+        )
+
+        slices = iris.cube.CubeList()
+        for u2d, v2d in zip(
+            u.slices(["latitude", "longitude"]),
+            v.slices(["latitude", "longitude"]),
+            strict=True,
+        ):
+            uu = np.ma.filled(u2d.data, np.nan)
+            vv = np.ma.filled(v2d.data, np.nan)
+            hke = 0.5 * (uu**2 + vv**2)
+            power = np.fft.fftshift(np.abs(np.fft.fftn(hke)) ** 2, axes=(0, 1))
+            spectrum = power.mean(axis=1) if keep_y else power.mean(axis=0)
+            spec = iris.cube.Cube(
+                spectrum,
+                long_name="horizontal_kinetic_energy_power",
+                units=u2d.units**2 * u2d.units**2,
+                dim_coords_and_dims=[(wavenumber.copy(), 0)],
+                attributes=u2d.attributes.copy(),
+            )
+            for coord in u2d.aux_coords:
+                if coord.shape == (1,) and coord.name() not in (
+                    "latitude",
+                    "longitude",
+                ):
+                    spec.add_aux_coord(coord.copy())
+            for coord in u2d.dim_coords:
+                if coord.shape == (1,) and coord.name() not in (
+                    "latitude",
+                    "longitude",
+                ):
+                    spec.add_aux_coord(iris.coords.AuxCoord.from_coord(coord))
+            slices.append(spec)
+        out.append(slices.merge_cube() if len(slices) > 1 else slices[0])
+    return out[0] if len(out) == 1 else out
