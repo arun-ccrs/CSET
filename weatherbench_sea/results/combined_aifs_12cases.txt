@@ -1,0 +1,26 @@
+AIFS components, CSET vs shipped (normalised, 12 cases)
+component                                           12 h                  24 h                  36 h                  48 h
+trad_z                                0.0023663 (+2e-09)    0.0022022 (-4e-08)    0.0024022 (-6e-08)    0.0022013 (+4e-08)
+trad_t                                 0.003551 (+1e-06)    0.0033793 (+2e-06)    0.0035916 (+1e-06)    0.0034404 (+2e-06)
+trad_q                                  0.23147 (-5e-08)      0.23306 (+2e-08)       0.2362 (-7e-08)      0.24163 (+2e-09)
+trad_wind                                1.7937 (+4e-08)       1.8163 (+8e-09)       1.8564 (+2e-08)         1.92 (-3e-08)
+dyn_mse_convergence                      1.1612 (-7e-09)       1.1895 (-6e-09)       1.2027 (-6e-09)       1.2112 (-7e-09)
+dyn_mse_divergence                       1.2847 (+1e-09)       1.3102 (+3e-09)       1.3273 (+5e-10)       1.3496 (+1e-09)
+dyn_vorticity_convergence                1.7511 (+1e-08)       1.8387 (+6e-09)        1.916 (+7e-09)       1.9979 (+9e-10)
+dyn_surface_temperature_energy            5.632 (-2e-08)       5.6304 (-2e-08)       5.5558 (-2e-08)       5.5228 (-2e-08)
+spectra (mean of 3 levels)              0.60954 (+3e-08)      0.38691 (+1e-07)      0.33278 (-3e-07)      0.33598 (+3e-07)
+precip penalty (1 - mean FSS)           0.81805 (+5e-06)      0.82709 (-7e-06)      0.83866 (+9e-06)      0.84909 (+2e-05)
+  [12cases] Global scale (base pool, spectra+precip excluded): 6.3958
+
+global_scale: with CSET AIFS 6.39585, all shipped 6.39585
+
+Combined score, 12 cases: CSV | this aggregation (all shipped) | with CSET AIFS
+  PanguWeather 1.6833|1.6833|1.6833  1.9705|1.9705|1.9705  1.8018|1.8018|1.8018  2.0233|2.0233|2.0233
+  FourcastNet  2.0044|2.0044|2.0044  2.0384|2.0384|2.0384  2.2092|2.2092|2.2092  2.5267|2.5267|2.5267
+  AIFS         2.0991|2.0991|2.0991  1.9788|1.9788|1.9788  1.9593|1.9593|1.9593  1.9828|1.9828|1.9828
+  Graphcast    1.8253|1.8253|1.8253  1.9622|1.9622|1.9622  1.9568|1.9568|1.9568  2.1385|2.1385|2.1385
+  Aurora       1.7433|1.7433|1.7433  1.7647|1.7647|1.7647  1.7856|1.7856|1.7856  1.9266|1.9266|1.9266
+
+Worst AIFS component relative difference (CSET vs shipped): 2.1e-05
+Aggregation check (all shipped vs CSV), worst |difference|:  4.4e-16
+With CSET AIFS vs CSV, worst |difference| over all rows:   1.1e-05  -> PASS (threshold 1e-4)

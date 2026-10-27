@@ -1,0 +1,31 @@
+{
+  "name": "AIFS",
+  "forecast_dir": "/home/project/13004327/evaluation_service/AIweatherbench/aifs_folder/aifs_output_regridded",
+  "filename_template": "aifs_gridded_{date}_{hour}-out-{lead}_regridded.nc",
+  "pressure_dim": "level",
+  "pl_truth": {
+    "dir": "/home/project/13004327/evaluation_service/AIweatherbench/era5_data/era5_pl_splits_6hr_final",
+    "variables": {
+      "z": {"name": "z", "unit": "geopotential"},
+      "t": {"name": "t", "unit": "K"},
+      "q": {"name": "q", "unit": "kg/kg"},
+      "u": {"name": "u", "unit": "m/s"},
+      "v": {"name": "v", "unit": "m/s"}
+    }
+  },
+  "sfc_truth": {
+    "dir": "/home/project/13004327/evaluation_service/AIweatherbench/era5_data/era5_sfc_splits_6hr_regridded",
+    "t2m_dir": "/home/project/13004327/evaluation_service/AIweatherbench/era5_data/era5_sfc_splits_6hr_t2m_regridded",
+    "variables": {
+      "u10": {"name": "u10", "unit": "m/s"},
+      "v10": {"name": "v10", "unit": "m/s"},
+      "t2m": {"name": "t2m", "unit": "K"}
+    }
+  },
+  "precip_truth": {
+    "dir": "/home/project/13004327/evaluation_service/AIweatherbench/gpm_folder/accumulated",
+    "variables": {
+      "precip": {"name": "precipitation", "unit": "mm"}
+    }
+  }
+}
